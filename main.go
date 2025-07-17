@@ -42,6 +42,7 @@ func createSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	text := r.FormValue("text")
 	durationStr := r.FormValue("duration")
+	shorten := r.FormValue("shorten") == "true"
 	if text == "" || durationStr == "" {
 		http.Error(w, "Missing text or duration", http.StatusBadRequest)
 		return
@@ -59,6 +60,9 @@ func createSessionHandler(w http.ResponseWriter, r *http.Request) {
 	mu.Unlock()
 	// Return the link as JSON
 	resp := map[string]string{"link": fmt.Sprintf("/paste/%s", id)}
+	if shorten {
+		resp["short_link"] = fmt.Sprintf("/s/%s", id)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
@@ -78,6 +82,18 @@ func viewSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tmpl.Execute(w, session)
+}
+
+func shortLinkHandler(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/s/")
+	mu.RLock()
+	session, ok := sessions[id]
+	mu.RUnlock()
+	if !ok || time.Now().After(session.ExpiresAt) {
+		http.Error(w, "Session not found or expired", http.StatusNotFound)
+		return
+	}
+	http.Redirect(w, r, "/paste/"+id, http.StatusFound)
 }
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
@@ -103,6 +119,7 @@ func main() {
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc("/paste", createSessionHandler)
 	http.HandleFunc("/paste/", viewSessionHandler)
+	http.HandleFunc("/s/", shortLinkHandler)
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
